@@ -113,15 +113,17 @@ export default function Dashboard() {
     setProgress(0);
     setProgressLabel('Uploading footage…');
 
+    let progressInterval: ReturnType<typeof setInterval> | null = null;
+
     try {
       const formData = new FormData();
       formData.append('video', file);
 
-      const progressInterval = setInterval(() => {
+      progressInterval = setInterval(() => {
         setProgress((p) => {
           if (p >= 80) {
             setProgressLabel('Analyzing frames…');
-            clearInterval(progressInterval);
+            if (progressInterval) clearInterval(progressInterval);
             return p;
           }
           if (p > 40) setProgressLabel('Processing with AI model…');
@@ -140,7 +142,7 @@ export default function Dashboard() {
         body: formData,
       });
 
-      clearInterval(progressInterval);
+      if (progressInterval) clearInterval(progressInterval);
       setProgress(100);
       setProgressLabel('Done!');
 
@@ -165,29 +167,32 @@ export default function Dashboard() {
         const data = await response.json();
         setResult(data);
         const nested = data.result || data.data || {};
-        
-        // Extract processed video URL
-        const outputUrl =
-          data.video_url ||
-          data.download_url ||
-          data.output_url ||
-          data.output_video_url ||
-          data.result_video_url ||
-          data.video ||
-          data.file_url ||
-          data.processed_video_url ||
-          nested.video_url ||
-          nested.download_url ||
-          nested.output_url ||
-          nested.output_video_url ||
-          nested.result_video_url ||
-          nested.video ||
-          nested.file_url ||
-          nested.processed_video_url;
-        if (outputUrl) {
-          setOutputVideoUrl(
-            outputUrl.startsWith('http') ? outputUrl : `${API_BASE}${outputUrl}`
-          );
+        if (data.video_b64) {
+          const byteChars = atob(data.video_b64);
+          const byteArr = new Uint8Array(byteChars.length);
+          for (let i = 0; i < byteChars.length; i++) {
+            byteArr[i] = byteChars.charCodeAt(i);
+          }
+          const blob = new Blob([byteArr], { type: 'video/mp4' });
+          setOutputVideoUrl(URL.createObjectURL(blob));
+        } else {
+          const outputUrl =
+            data.video_url ||
+            data.download_url ||
+            data.output_url ||
+            data.output_video_url ||
+            data.result_video_url ||
+            data.video ||
+            data.file_url ||
+            data.processed_video_url ||
+            nested.video_url ||
+            nested.download_url ||
+            nested.output_url;
+          if (outputUrl) {
+            setOutputVideoUrl(
+              outputUrl.startsWith('http') ? outputUrl : `${API_BASE}${outputUrl}`
+            );
+          }
         }
         
         // Extract original video URL
@@ -201,7 +206,7 @@ export default function Dashboard() {
 
       setStatus(STATUS.DONE);
     } catch (err: any) {
-      clearInterval(progressInterval);
+      if (progressInterval) clearInterval(progressInterval);
       console.error('Analysis error:', err);
       setError(
         err.message === 'Failed to fetch'
