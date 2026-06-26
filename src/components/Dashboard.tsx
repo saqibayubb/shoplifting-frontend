@@ -56,23 +56,32 @@ export default function Dashboard() {
     if (savedSession) {
       try {
         const session = JSON.parse(savedSession);
+        // Blob URLs die on reload — discard any session that relied on them
+        const hasDeadBlobUrl =
+          session.outputVideoUrl?.startsWith('blob:') ||
+          session.originalVideoUrl?.startsWith('blob:');
+        if (hasDeadBlobUrl) {
+          localStorage.removeItem('detectionSession');
+          return;
+        }
         setResult(session.result);
         setOutputVideoUrl(session.outputVideoUrl);
         setOriginalVideoUrl(session.originalVideoUrl);
         setStatus(session.status);
       } catch (e) {
         console.error('Failed to load session:', e);
+        localStorage.removeItem('detectionSession');
       }
     }
   }, []);
 
-  // Save session data whenever results change
+  // Save session data whenever results change — never save blob URLs
   useEffect(() => {
     if (result || outputVideoUrl) {
       const session = {
         result,
-        outputVideoUrl,
-        originalVideoUrl,
+        outputVideoUrl: outputVideoUrl?.startsWith('blob:') ? null : outputVideoUrl,
+        originalVideoUrl: originalVideoUrl?.startsWith('blob:') ? null : originalVideoUrl,
         status: STATUS.DONE,
       };
       localStorage.setItem('detectionSession', JSON.stringify(session));
@@ -167,31 +176,29 @@ export default function Dashboard() {
         const data = await response.json();
         setResult(data);
         const nested = data.result || data.data || {};
-        if (data.video_b64) {
-          const byteChars = atob(data.video_b64);
-          const byteArr = new Uint8Array(byteChars.length);
-          for (let i = 0; i < byteChars.length; i++) {
-            byteArr[i] = byteChars.charCodeAt(i);
-          }
-          const blob = new Blob([byteArr], { type: 'video/mp4' });
-          setOutputVideoUrl(URL.createObjectURL(blob));
-        } else {
-          const outputUrl =
-            data.video_url ||
-            data.download_url ||
-            data.output_url ||
-            data.output_video_url ||
-            data.result_video_url ||
-            data.video ||
-            data.file_url ||
-            data.processed_video_url ||
-            nested.video_url ||
-            nested.download_url ||
-            nested.output_url;
-          if (outputUrl) {
-            setOutputVideoUrl(
-              outputUrl.startsWith('http') ? outputUrl : `${API_BASE}${outputUrl}`
-            );
+        // Fetch processed video as blob so browser can play it cross-origin
+        const outputUrl =
+          data.video_url ||
+          data.download_url ||
+          data.output_url ||
+          data.output_video_url ||
+          data.processed_video_url ||
+          nested.video_url ||
+          nested.download_url ||
+          nested.output_url;
+
+        if (outputUrl) {
+          try {
+            const fullUrl = outputUrl.startsWith('http') ? outputUrl : `${API_BASE}${outputUrl}`;
+            const videoRes = await fetch(fullUrl);
+            if (videoRes.ok) {
+              const videoBlob = await videoRes.blob();
+              setOutputVideoUrl(URL.createObjectURL(videoBlob));
+            } else {
+              setOutputVideoUrl(fullUrl);
+            }
+          } catch {
+            setOutputVideoUrl(outputUrl.startsWith('http') ? outputUrl : `${API_BASE}${outputUrl}`);
           }
         }
         
